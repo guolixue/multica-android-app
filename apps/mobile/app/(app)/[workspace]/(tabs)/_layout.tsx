@@ -24,12 +24,17 @@ import { useRef } from "react";
 import { Tabs } from "expo-router";
 import { Image } from "expo-image";
 import { Platform, View } from "react-native";
+import { PlatformPressable } from "@react-navigation/elements";
+import type { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { TriggerRef } from "@rn-primitives/dropdown-menu";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
-import { TAB_BAR_HEIGHT, tabBarBottomPadding } from "@/lib/tab-bar";
+import {
+  tabBarBottomPadding,
+  tabBarContentHeight,
+} from "@/lib/tab-bar";
 import {
   useInboxUnreadCount,
   useChatUnreadMessageCount,
@@ -45,6 +50,27 @@ const BADGE_STYLE = {
   backgroundColor: THEME.light.brand,
 };
 
+/**
+ * Custom tab button that vertically centers the icon+label block on
+ * Android. React Navigation's default `tabVerticalUiKit` item style is
+ * `justifyContent: 'flex-start'`, so the content hugs the top of the tab
+ * bar and — with the taller Android content area — leaves an unbalanced
+ * gap below. Centering it makes the Inbox / My Issues / Chat / More group
+ * sit evenly in the bar's content area, clear of the gesture-navigation
+ * pill. iOS keeps the default top-aligned layout (49px content fits the
+ * labels without overflow), so the override is Android-only.
+ */
+function TabBarButton({ style, children, ...rest }: BottomTabBarButtonProps) {
+  return (
+    <PlatformPressable
+      {...rest}
+      style={[style, Platform.OS === "android" && { justifyContent: "center" }]}
+    >
+      {children}
+    </PlatformPressable>
+  );
+}
+
 export default function TabsLayout() {
   const { colorScheme } = useColorScheme();
   const t = THEME[colorScheme];
@@ -54,15 +80,17 @@ export default function TabsLayout() {
   const inboxUnread = useInboxUnreadCount(wsId);
   const chatUnread = useChatUnreadMessageCount(wsId);
 
-  // Android: keep the labels clear of the gesture-navigation area (see
-  // lib/tab-bar.ts). iOS keeps React Navigation's default height so
-  // landscape compact layout is untouched.
+  // Android: taller content area so the fontSize-16 labels fit without
+  // overflowing into the gesture-navigation area, plus bottom padding to
+  // clear the pill (see lib/tab-bar.ts). iOS keeps React Navigation's
+  // default height so landscape compact layout is untouched.
   const bottomPadding = tabBarBottomPadding(insets);
+  const contentHeight = tabBarContentHeight();
   const tabBarStyle = {
     backgroundColor: t.background,
     paddingBottom: bottomPadding,
     ...(Platform.OS === "android"
-      ? { height: TAB_BAR_HEIGHT + bottomPadding }
+      ? { height: contentHeight + bottomPadding }
       : {}),
   };
 
@@ -86,6 +114,7 @@ export default function TabsLayout() {
           tabBarActiveTintColor: t.foreground,
           tabBarInactiveTintColor: t.mutedForeground,
           tabBarStyle,
+          tabBarButton: TabBarButton,
           tabBarLabelStyle: { fontSize: 16 },
         }}
       >

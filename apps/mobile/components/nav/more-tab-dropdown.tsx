@@ -55,7 +55,7 @@ import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
-import { TAB_BAR_HEIGHT, tabBarBottomPadding } from "@/lib/tab-bar";
+import { tabBarBottomPadding, tabBarContentHeight } from "@/lib/tab-bar";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -100,7 +100,7 @@ export function MoreTabDropdownAnchor({
         right: 0,
         bottom: tabBarBottomPadding(insets),
         width: "25%",
-        height: TAB_BAR_HEIGHT,
+        height: tabBarContentHeight(),
       }}
     >
       <DropdownMenu>
