@@ -1,11 +1,10 @@
-import { useCallback, useMemo, useState } from "react";
-import { Alert, FlatList, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, FlatList, Platform, ToastAndroid, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { InboxItem } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Header } from "@/components/ui/header";
 import { IconButton } from "@/components/ui/icon-button";
@@ -33,6 +32,11 @@ export default function Inbox() {
   const { data: rawItems, isLoading, error, refetch } = useQuery(
     inboxListOptions(wsId),
   );
+  useEffect(() => {
+    if (!error || Platform.OS !== "android") return;
+    const message = error instanceof Error ? error.message : "unknown error";
+    ToastAndroid.show(`Failed to load inbox: ${message}`, ToastAndroid.LONG);
+  }, [error]);
   // The FlatList `refreshing` prop is controlled — binding it to isRefetching
   // would show the pull-to-refresh spinner during background/auto refetches
   // (cold-start cache restore + WS-triggered invalidations). Only show it
@@ -136,18 +140,8 @@ export default function Inbox() {
           </>
         }
       />
-      {isLoading ? (
+      {isLoading && rawItems === undefined ? (
         <InboxLoading />
-      ) : error ? (
-        <View className="px-4 gap-3 pt-4">
-          <Text className="text-sm text-destructive">
-            Failed to load inbox:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
-          </Text>
-          <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
-          </Button>
-        </View>
       ) : !data || data.length === 0 ? (
         <InboxEmpty iconColor={THEME[colorScheme].mutedForeground} />
       ) : (
