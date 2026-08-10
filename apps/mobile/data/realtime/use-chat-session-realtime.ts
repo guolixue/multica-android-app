@@ -13,9 +13,11 @@
  *                                  onto the assistant message
  *   - task:queued / dispatch    → seed / promote pendingTask
  *   - task:cancelled            → refresh pendingTask + messages
- *   - task:completed            → no-op for messages (chat:done already
- *                                  wrote the assistant message); just
- *                                  refresh pendingTask
+ *   - task:completed            → refresh pendingTask + invalidate messages
+ *                                  (chat:done normally wrote the assistant
+ *                                  message inline; the invalidate is a safety
+ *                                  net so a dropped chat:done still surfaces
+ *                                  the persisted result)
  *   - task:failed               → refresh pendingTask + invalidate messages
  *                                  (FailTask persists a failure assistant
  *                                  message that must show up)
@@ -89,7 +91,14 @@ export function useChatSessionRealtime(
         }),
         ws.on("task:completed", (payload) => {
           if (!isMine(payload)) return;
+          // Safety net for a lost `chat:done`: normally chat:done already
+          // wrote the assistant message inline, but if that event was
+          // dropped (flaky WS) the result would never surface. The
+          // completion event is the second authoritative signal that the
+          // turn finished, so refetch the message list to pull the
+          // persisted assistant reply (attachments included).
           invalidatePendingTask(qc, sessionId);
+          qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
         }),
         ws.on("task:failed", (payload) => {
           if (!isMine(payload)) return;
