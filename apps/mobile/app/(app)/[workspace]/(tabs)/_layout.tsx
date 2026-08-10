@@ -86,7 +86,7 @@ export default function TabsLayout() {
           tabBarActiveTintColor: t.foreground,
           tabBarInactiveTintColor: t.mutedForeground,
           tabBarStyle,
-          tabBarLabelStyle: { fontSize: 11 },
+          tabBarLabelStyle: { fontSize: 16 },
         }}
       >
         <Tabs.Screen
