@@ -39,10 +39,13 @@ export const issueDetailOptions = (wsId: string | null, id: string) =>
     queryKey: issueKeys.detail(wsId, id),
     queryFn: ({ signal }) => api.getIssue(id, { signal }),
     enabled: !!wsId && !!id,
-    // Keep the last-known issue on screen while a refetch runs (WS event,
-    // reconnect invalidate, focus). Combined with detail being persisted to
-    // AsyncStorage, a cold start renders the restored issue instantly
-    // instead of blanking to the full-screen loader.
+    // Every entry into the issue screen silently refetches the detail —
+    // "always" forces the refetch even when the cached copy is still fresh,
+    // so the screen always catches up to server state. placeholderData keeps
+    // the last-known issue visible during that background refetch (and a
+    // restored disk cache makes a cold start render instantly), so the fresh
+    // data never costs a blank screen.
+    refetchOnMount: "always",
     placeholderData: (prev) => prev,
   });
 
@@ -56,9 +59,10 @@ export const issueTimelineOptions = (wsId: string | null, id: string) =>
     queryKey: issueKeys.timeline(wsId, id),
     queryFn: ({ signal }) => api.listTimeline(id, { signal }),
     enabled: !!wsId && !!id,
-    // Same "no blank while refetching" contract as detail: within a session,
-    // a WS/reconnect-triggered timeline refetch keeps the previous entries
-    // visible rather than dropping to the header spinner.
+    // Same as detail: refetch on every entry so the timeline always catches
+    // up to server state. placeholderData keeps the previous entries visible
+    // while that background refetch runs.
+    refetchOnMount: "always",
     placeholderData: (prev) => prev,
   });
 

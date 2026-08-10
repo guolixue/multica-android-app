@@ -285,6 +285,25 @@ export default function ChatTab() {
     useCallback(() => () => useChatSelectStore.getState().clear(), []),
   );
 
+  // Silent background refresh on every entry into the chat tab. The tab
+  // stays mounted across tab switches, so `refetchOnMount: "always"` on
+  // chatMessagesOptions only fires when the session changes — not when the
+  // user just switches back to Chat. Refetching on focus keeps the active
+  // session's transcript + pending-task current every time the tab gains
+  // focus, while the existing cache stays visible during the refetch
+  // (placeholderData), preserving the "instant old data" feel.
+  useFocusEffect(
+    useCallback(() => {
+      if (!activeSessionId) return;
+      qc.refetchQueries({
+        queryKey: chatKeys.messages(activeSessionId),
+      });
+      qc.refetchQueries({
+        queryKey: chatKeys.pendingTask(activeSessionId),
+      });
+    }, [activeSessionId, qc]),
+  );
+
   // ── Auto markRead while viewing a session with unread state ──────────
   const isFocused = useIsFocused();
   const markRead = useMarkChatSessionRead();

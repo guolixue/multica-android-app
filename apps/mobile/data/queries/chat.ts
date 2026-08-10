@@ -67,11 +67,12 @@ export const chatMessagesOptions = (sessionId: string | null) =>
     queryFn: ({ signal }) => api.listChatMessages(sessionId!, { signal }),
     enabled: !!sessionId,
     staleTime: Infinity,
-    // Keep the last-known transcript on screen while a refetch runs (the
-    // cold-start invalidate in ensureQueryCacheRestored, reconnect, WS
-    // event). Combined with transcripts being persisted to AsyncStorage, a
-    // cold start renders the restored conversation instantly instead of the
-    // full-screen loader.
+    // Refetch on every entry into the session — "always" overrides the
+    // staleTime: Infinity so re-entering a chat silently pulls the latest
+    // transcript instead of relying solely on WS events. placeholderData
+    // keeps the last-known conversation visible during the background
+    // refetch (and a restored disk cache makes a cold start render instantly).
+    refetchOnMount: "always",
     placeholderData: (prev) => prev,
   });
 
