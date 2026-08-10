@@ -187,27 +187,18 @@ export function Markdown({
         switch (seg.type) {
           case "prose":
             return (
-              // Android: react-native-enriched-markdown's native TextView can
-              // paint taller than it reports to RN's layout, so the sibling
-              // below (an attachment image, an ActivityRow, the next comment)
-              // would overlap the text's real ink. Two guards:
-              //   - `pb-3` (12px) bottom padding absorbs the normal
-              //     over-draw — enough to clear the 12px row gap above the
-              //     next sibling in the common case.
-              //   - `overflow-hidden` is the hard guarantee: if the native
-              //     text ever draws MORE than the buffer (blockquote at the
-              //     end of a comment collapses its trailing margin to 0, so
-              //     the last line sits flush), the excess is clipped inside
-              //     this View and can never paint onto the sibling below.
-              //     (Not `collapsable` — that only mattered on Paper; this
-              //     app runs New Architecture/Fabric where it's a no-op.)
-              <View key={i} className="pb-3 overflow-hidden">
+              // Android's native renderer can paint slightly beyond Yoga's
+              // measured height. Reserve room for it, but never clip prose:
+              // losing the last line is worse than a small extra gap before
+              // the following timeline item.
+              <View key={i} className="pb-6">
                 <EnrichedMarkdownText
                   flavor="github"
                   markdown={seg.content}
                   markdownStyle={markdownStyle}
                   onLinkPress={onLinkPress}
                   selectable={selectable}
+                  allowTrailingMargin
                 />
               </View>
             );
