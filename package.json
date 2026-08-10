@@ -1,0 +1,39 @@
+{
+  "name": "multica-android-app",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:mobile": "pnpm -C apps/mobile dev",
+    "dev:mobile:staging": "pnpm -C apps/mobile dev:staging",
+    "dev:mobile:prod": "pnpm -C apps/mobile dev:prod",
+    "ios:mobile": "pnpm -C apps/mobile ios",
+    "ios:mobile:staging": "pnpm -C apps/mobile ios:staging",
+    "ios:mobile:prod": "pnpm -C apps/mobile ios:prod",
+    "ios:mobile:device": "pnpm -C apps/mobile ios:device",
+    "ios:mobile:device:staging": "pnpm -C apps/mobile ios:device:staging",
+    "ios:mobile:device:staging:release": "pnpm -C apps/mobile ios:device:staging:release",
+    "ios:mobile:device:prod": "pnpm -C apps/mobile ios:device:prod",
+    "ios:mobile:device:prod:release": "pnpm -C apps/mobile ios:device:prod:release",
+    "typecheck": "pnpm -C apps/mobile typecheck",
+    "lint": "pnpm -C apps/mobile lint",
+    "test": "pnpm -C apps/mobile test"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "electron"
+    ],
+    "overrides": {
+      "@types/react": "catalog:",
+      "@types/react-dom": "catalog:",
+      "@xmldom/xmldom": "^0.8.13",
+      "postcss": "8.5.10",
+      "uuid": "11.1.1"
+    }
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}
