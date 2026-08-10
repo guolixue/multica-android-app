@@ -17,7 +17,9 @@
     "ios:mobile:device:prod:release": "pnpm -C apps/mobile ios:device:prod:release",
     "typecheck": "pnpm -C apps/mobile typecheck",
     "lint": "pnpm -C apps/mobile lint",
-    "test": "pnpm -C apps/mobile test"
+    "test": "pnpm -C apps/mobile test",
+    "build:android:apk": "pnpm -C apps/mobile build:android:apk",
+    "build:android:apk:universal": "pnpm -C apps/mobile build:android:apk:universal"
   },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {
