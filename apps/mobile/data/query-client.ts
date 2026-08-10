@@ -39,7 +39,18 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 60 * 1000, // 1 minute
-      gcTime: 10 * 60 * 1000, // 10 minutes
+      // gcTime is the effective disk-cache lifetime too, not just memory:
+      // persistQueryClientSave re-dehydrates on every cache event including
+      // "removed", and dehydrate() only serializes queries still in the
+      // in-memory cache. So when a query is GC'd after gcTime of inactivity,
+      // the "removed" event fires and the AsyncStorage blob is re-written
+      // WITHOUT it — the intended 7-day PERSIST_MAX_AGE never matters because
+      // the query is pruned from disk at gcTime. A 10-minute gcTime meant a
+      // viewed issue (detail + timeline) survived cold-start restores for
+      // ~10 minutes, which is why reopening the app later still felt slow.
+      // 24h keeps the persisted cache usable across same-day/next-day restarts
+      // without pinning a week of chat transcripts in memory.
+      gcTime: 24 * 60 * 60 * 1000, // 24 hours
       retry: 1,
       refetchOnWindowFocus: true, // honored via focusManager bridge below
     },
@@ -121,7 +132,7 @@ function shouldPersistQuery(query: Query): boolean {
       // Only persist transcripts whose last update is recent. After the
       // cold-start invalidate below, the mounted session refetches and
       // stays fresh; sessions the user isn't actively in age out of the
-      // blob (though they stay in memory for gcTime 10 min).
+      // blob (though they stay in memory for gcTime 24h).
       return (
         Date.now() - query.state.dataUpdatedAt <
         CHAT_MESSAGE_PERSIST_WINDOW_MS
