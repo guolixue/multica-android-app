@@ -78,3 +78,6 @@ data/
 # Python (agent tooling)
 __pycache__/
 *.pyc
+
+# Build artifacts
+*.apk
