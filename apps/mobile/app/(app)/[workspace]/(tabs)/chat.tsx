@@ -304,26 +304,6 @@ export default function ChatTab() {
     }, [activeSessionId, qc]),
   );
 
-  // Explicit refresh via bottom pull-up ("上滑触发显式刷新") — the same
-  // silent-refetch targets as the focus handler above, but user-initiated
-  // and awaited so the footer spinner (controlled `userRefreshing` state)
-  // stays visible until the refetch settles. Mirror of issue/[id].tsx's
-  // TimelineList wiring: `refreshing` only shows on a user pull, never on
-  // background/auto refetches.
-  const [userRefreshing, setUserRefreshing] = useState(false);
-  const handleRefresh = useCallback(async () => {
-    if (!activeSessionId) return;
-    setUserRefreshing(true);
-    try {
-      await Promise.all([
-        qc.refetchQueries({ queryKey: chatKeys.messages(activeSessionId) }),
-        qc.refetchQueries({ queryKey: chatKeys.pendingTask(activeSessionId) }),
-      ]);
-    } finally {
-      setUserRefreshing(false);
-    }
-  }, [activeSessionId, qc]);
-
   // ── Auto markRead while viewing a session with unread state ──────────
   const isFocused = useIsFocused();
   const markRead = useMarkChatSessionRead();
@@ -592,8 +572,6 @@ export default function ChatTab() {
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}
           availability={presenceAvailability}
-          refreshing={userRefreshing}
-          onRefresh={handleRefresh}
         />
         {runtimeBound ? (
           <OfflineBanner

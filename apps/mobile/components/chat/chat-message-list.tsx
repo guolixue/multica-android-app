@@ -27,13 +27,6 @@
  * baseline would shift layout per message. See `useChatMessageLongPress`
  * in `./message-long-press.tsx`.
  *
- * Explicit refresh: because the transcript opens at the bottom, the chat's
- * manual-refresh gesture is a swipe-up at the bottom edge — the same
- * bottom pull-to-refresh as the issue timeline (timeline-list.tsx). A
- * drag that starts at the bottom and stays there fires `onRefresh`
- * (mirrors issue/[id].tsx's user-initiated refresh); a scroll up through
- * history is unaffected.
- *
  * List engine: FlashList v2 (Shopify). FlatList was the original choice
  * (per the now-outdated "no FlashList" baseline in apps/mobile/CLAUDE.md
  * — written before FlashList v2 stabilised). FlatList's `scrollToEnd` is
@@ -47,14 +40,8 @@
  * `startRenderingFromBottom` (initial paint at bottom, no setTimeout
  * hacks). Cell recycling also keeps scroll-up smooth.
  */
-import { useCallback, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from "react-native";
+import { useMemo, useState } from "react";
+import { Pressable, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
@@ -88,12 +75,6 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 
-/** Pixel slack at the bottom edge — inside this band we treat the user as
- *  "already at bottom", so a swipe-up there is a pull-up-to-refresh rather
- *  than a scroll through history. Mirrors AT_BOTTOM_SLACK_PX in
- *  timeline-list.tsx. */
-const AT_BOTTOM_SLACK_PX = 80;
-
 interface Props {
   messages: ChatMessage[];
   loading: boolean;
@@ -119,13 +100,6 @@ interface Props {
   /** Resolved availability — drives the StatusPill's "Offline" /
    *  "Reconnecting" stages. Pass `undefined` while loading. */
   availability?: AgentAvailability;
-  /** Controlled pull-up-to-refresh state — only true on a user-initiated
-   *  bottom pull, so the footer spinner never shows on background refetches
-   *  (WS events, focus refresh). Mirrors issue/[id].tsx's TimelineList. */
-  refreshing?: boolean;
-  /** Fired when the user swipes up while at the bottom of the transcript —
-   *  the chat's explicit refresh gesture. Omit to disable the gesture. */
-  onRefresh?: () => void;
 }
 
 export function ChatMessageList({
@@ -139,8 +113,6 @@ export function ChatMessageList({
   pendingTask,
   liveTaskMessages,
   availability,
-  refreshing = false,
-  onRefresh,
 }: Props) {
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
@@ -164,66 +136,6 @@ export function ChatMessageList({
         attachments: message.attachments,
       })),
     [messages],
-  );
-
-  // ── Bottom pull-to-refresh tracking ───────────────────────────────────
-  // Mirror of timeline-list.tsx: when the user is at the bottom of the
-  // transcript and swipes up (an upward drag that stays at the bottom
-  // edge), trigger an explicit refresh. Chat opens at the bottom
-  // (`startRenderingFromBottom`), so this is the natural "check for new
-  // messages" gesture. RN's RefreshControl only anchors to the top edge, so
-  // this is hand-rolled from scroll events. On Android the content is
-  // clamped at the bottom and produces NO onScroll during a bottom pull, so
-  // we capture the pre-drag offset in onScrollBeginDrag (from the last known
-  // scroll position) and compare it against the offset at onScrollEndDrag.
-  // Defaults to `true` — the list opens at the bottom, so the first pull is
-  // a valid bottom-pull refresh.
-  const isAtBottomRef = useRef(true);
-  const lastScrollOffsetRef = useRef(0);
-  // contentOffset.y when the drag began while at the bottom. null = the
-  // current drag did not start at the bottom (so no bottom pull).
-  const bottomDragStartOffsetRef = useRef<number | null>(null);
-
-  const handleScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-      const distFromBottom =
-        contentSize.height - (contentOffset.y + layoutMeasurement.height);
-      isAtBottomRef.current = distFromBottom < AT_BOTTOM_SLACK_PX;
-      // Always keep the latest offset so onScrollBeginDrag can snapshot the
-      // pre-drag position (on Android the content is clamped at the bottom,
-      // so no onScroll fires during a bottom pull to capture it mid-drag).
-      lastScrollOffsetRef.current = contentOffset.y;
-    },
-    [],
-  );
-
-  const handleScrollBeginDrag = useCallback(() => {
-    useChatSelectStore.getState().clear();
-    // Capture the pre-drag offset only if the drag begins at the bottom — a
-    // pull that starts mid-list and merely reaches the bottom is a normal
-    // scroll, not a pull-up-to-refresh.
-    if (isAtBottomRef.current) {
-      bottomDragStartOffsetRef.current = lastScrollOffsetRef.current;
-    }
-  }, []);
-
-  const handleScrollEndDrag = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const start = bottomDragStartOffsetRef.current;
-      bottomDragStartOffsetRef.current = null;
-      // Only a drag that started at the bottom counts as a bottom pull.
-      if (start === null) return;
-      if (refreshing) return;
-      if (!isAtBottomRef.current) return;
-      // An upward-finger swipe at the bottom keeps contentOffset at (or
-      // past) the bottom edge — final offset >= start. If the user instead
-      // scrolled up toward the top, offset dropped below start and this is
-      // a normal scroll, not a pull-up-to-refresh.
-      if (e.nativeEvent.contentOffset.y < start - 1) return;
-      onRefresh?.();
-    },
-    [refreshing, onRefresh],
   );
 
   if (loading && messages.length === 0) {
@@ -294,30 +206,16 @@ export function ChatMessageList({
       )}
       ItemSeparatorComponent={MessageSeparator}
       ListFooterComponent={
-        showLiveSection || refreshing ? (
-          <View
-            style={{ paddingTop: showLiveSection ? 12 : 0 }}
-            className="gap-2"
-          >
-            {showLiveSection ? (
-              <>
-                {showLiveTimeline ? (
-                  <ChatTimeline items={liveTaskMessages ?? []} isStreaming />
-                ) : null}
-                <StatusPill
-                  pendingTask={pendingTask}
-                  taskMessages={liveTaskMessages}
-                  availability={availability}
-                />
-              </>
+        showLiveSection ? (
+          <View style={{ paddingTop: 12 }} className="gap-2">
+            {showLiveTimeline ? (
+              <ChatTimeline items={liveTaskMessages ?? []} isStreaming />
             ) : null}
-            {/* Bottom pull-to-refresh indicator — mirrors the timeline's
-                footer spinner while a bottom-initiated refresh runs. */}
-            {refreshing ? (
-              <View className="py-3 items-center">
-                <ActivityIndicator />
-              </View>
-            ) : null}
+            <StatusPill
+              pendingTask={pendingTask}
+              taskMessages={liveTaskMessages}
+              availability={availability}
+            />
           </View>
         ) : null
       }
@@ -342,11 +240,7 @@ export function ChatMessageList({
       // matches iMessage's behavior where scrolling implicitly commits /
       // dismisses the selection caret. Hooks both drag-start and the
       // momentum kick after a flick so a fast scroll can't escape.
-      // onScroll / onScrollBeginDrag / onScrollEndDrag additionally drive
-      // the bottom pull-to-refresh tracking above.
-      onScroll={handleScroll}
-      onScrollBeginDrag={handleScrollBeginDrag}
-      onScrollEndDrag={handleScrollEndDrag}
+      onScrollBeginDrag={() => useChatSelectStore.getState().clear()}
       onMomentumScrollBegin={() => useChatSelectStore.getState().clear()}
       // iMessage-style keyboard dismissal: dragging the list pulls the
       // keyboard down with the finger (iOS); tapping empty space between
