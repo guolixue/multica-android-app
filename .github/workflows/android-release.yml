@@ -1,0 +1,85 @@
+# Build a release APK on every `v*` tag push and attach it to a GitHub
+# Release, so users can download installable APKs from the Releases page.
+#
+# Flow (matches apps/mobile/CLAUDE.md "Build & release" rules):
+#   1. version-bump --set <tag>  — write the EXACT tag version (v0.2.3 → 0.2.3)
+#      into package.json / app.config.ts / build.gradle, so the release APK
+#      is versioned identically to the tag (not bumped +1, which is the
+#      local dev-build rule).
+#   2. expo prebuild --platform android — the android/ dir is git-ignored, so
+#      CI regenerates it from app.config.ts before building.
+#   3. gradlew assembleRelease — universal build (all ABIs) so any device
+#      can install the APK.
+#   4. copy-versioned-apk — rename to apps/mobile/dist/multica-app-v<v>.apk.
+#   5. action-gh-release — attach the APK to the Release for this tag.
+#
+# Tag version source: GITHUB_REF_NAME is the tag (e.g. "v0.2.3"); strip the
+# leading "v" to get the semver.
+name: Android Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Android project
+        working-directory: apps/mobile
+        run: pnpm exec expo prebuild --platform android --no-install
+
+      - name: Ensure debug keystore
+        run: |
+          if [ ! -f apps/mobile/android/app/debug.keystore ]; then
+            keytool -genkeypair -v -keystore apps/mobile/android/app/debug.keystore \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Set version from tag
+        run: node apps/mobile/scripts/bump-android-version.mjs --set "${GITHUB_REF_NAME#v}"
+
+      - name: Build release APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease
+
+      - name: Copy versioned APK
+        run: node apps/mobile/scripts/copy-versioned-apk.mjs
+
+      - name: Upload APK to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/mobile/dist/multica-app-v*.apk
+          generate_release_notes: true

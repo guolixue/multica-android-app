@@ -185,6 +185,23 @@ step copies it to `apps/mobile/dist/multica-app-v<version>.apk` (e.g.
 `multica-app-v0.2.3.apk`) so every artifact is identifiable and can't be
 confused with an older build. `dist/` is git-ignored build output.
 
+### GitHub Releases (auto-build on tag)
+
+`.github/workflows/android-release.yml` builds a release APK on every `v*`
+tag push and attaches it to a GitHub Release. The workflow:
+
+1. `bump-android-version.mjs --set "${GITHUB_REF_NAME#v}"` — writes the EXACT
+   tag version (v0.2.3 → 0.2.3) into all version files. Release builds pin the
+   tag version instead of bumping +1, so the APK version always equals the tag.
+2. `expo prebuild --platform android` — regenerates the git-ignored `android/`
+   dir from `app.config.ts` on a fresh checkout.
+3. `./gradlew assembleRelease` — universal build (all ABIs).
+4. `copy-versioned-apk.mjs` → `apps/mobile/dist/multica-app-v<tag>.apk`.
+5. `softprops/action-gh-release` attaches the APK to the Release.
+
+To publish: `git tag v0.2.3 && git push origin v0.2.3`. The Release page at
+`https://github.com/<owner>/multica-android-app/releases` then hosts the APK.
+
 Mobile release cadence is decoupled from main `v*.*.*` tags (server / CLI / desktop).
 
 ## Realtime / WebSocket strategy
