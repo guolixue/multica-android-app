@@ -304,6 +304,32 @@ export default function ChatTab() {
     }, [activeSessionId, qc]),
   );
 
+  // ── Explicit refresh (bottom swipe-up) ────────────────────────────────
+  // User-initiated version of the focus-refetch above: an upward swipe at
+  // the bottom of the message list refetches the transcript + pending task
+  // on demand. The ref guard keeps a second pull from stacking a duplicate
+  // refetch while one is already in flight; `userRefreshing` drives the
+  // bottom ActivityIndicator in ChatMessageList.
+  const refreshingRef = useRef(false);
+  const [userRefreshing, setUserRefreshing] = useState(false);
+  const handleRefreshChat = useCallback(async () => {
+    if (!activeSessionId) return;
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setUserRefreshing(true);
+    try {
+      await Promise.all([
+        qc.refetchQueries({ queryKey: chatKeys.messages(activeSessionId) }),
+        qc.refetchQueries({
+          queryKey: chatKeys.pendingTask(activeSessionId),
+        }),
+      ]);
+    } finally {
+      refreshingRef.current = false;
+      setUserRefreshing(false);
+    }
+  }, [activeSessionId, qc]);
+
   // ── Auto markRead while viewing a session with unread state ──────────
   const isFocused = useIsFocused();
   const markRead = useMarkChatSessionRead();
@@ -572,6 +598,8 @@ export default function ChatTab() {
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}
           availability={presenceAvailability}
+          onRefresh={handleRefreshChat}
+          refreshing={userRefreshing}
         />
         {runtimeBound ? (
           <OfflineBanner
