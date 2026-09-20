@@ -64,8 +64,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # The action's default `packages: tools platform-tools` now fails:
+      # Google retired the standalone `tools` package, so sdkmanager exits 1
+      # with "Failed to find package 'tools'". Ask for the packages that
+      # actually exist; AGP auto-provisions build-tools to match.
+      # compileSdk is 36, per expo-modules-core's ExpoModulesCorePlugin.gradle.
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
