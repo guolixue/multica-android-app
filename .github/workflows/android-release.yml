@@ -81,6 +81,15 @@ jobs:
       # in the environment of the Gradle step that runs `expo export:embed` —
       # not merely on disk. Sourced from the committed env file so there is one
       # source of truth.
+      #
+      # APP_ENV is exported for the same reason and is NOT redundant with the
+      # .env.production sourcing above: app.config.ts reads process.env.APP_ENV
+      # to pick the display name ("Multica" vs "Multica (Dev)") and the value it
+      # records in `extra.APP_ENV`. Nothing inside the app ever reads APP_ENV
+      # from a .env file — it is read exclusively by app.config.ts, at the
+      # moment Expo regenerates the config. Leaving it unset silently produced a
+      # release APK whose embedded `assets/app.config` said
+      # {"name":"Multica (Dev)","extra":{"APP_ENV":"development"}} (RAIN-33).
       - name: Load production env
         run: |
           set -a
@@ -90,7 +99,8 @@ jobs:
           test -n "$EXPO_PUBLIC_WEB_URL" || { echo "EXPO_PUBLIC_WEB_URL empty"; exit 1; }
           echo "EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL" >> "$GITHUB_ENV"
           echo "EXPO_PUBLIC_WEB_URL=$EXPO_PUBLIC_WEB_URL" >> "$GITHUB_ENV"
-          echo "Bundle will target: $EXPO_PUBLIC_API_URL (web: $EXPO_PUBLIC_WEB_URL)"
+          echo "APP_ENV=production" >> "$GITHUB_ENV"
+          echo "Bundle will target: $EXPO_PUBLIC_API_URL (web: $EXPO_PUBLIC_WEB_URL), APP_ENV=production"
 
       - name: Generate Android project
         working-directory: apps/mobile
@@ -139,6 +149,31 @@ jobs:
             exit 1
           fi
           echo "OK: dsh.shuzhipin.cn is inlined in the bundle"
+
+      # Guards RAIN-33. expo-constants' `createExpoConfig` gradle task
+      # regenerates app.config from app.config.ts on EVERY build and packs it
+      # into the APK as assets/app.config. Because that happens inside gradle,
+      # the config is evaluated with the gradle step's environment — so APP_ENV
+      # has to be there, and the only way to know it landed is to read the
+      # generated file rather than trust the env plumbing.
+      - name: Verify release app.config
+        run: |
+          CONFIG=apps/mobile/android/app/build/generated/assets/expo-constants/app.config
+          test -f "$CONFIG" || { echo "FAIL: app.config not generated at $CONFIG"; exit 1; }
+          cat "$CONFIG"; echo
+          node -e '
+            const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const appEnv = c.extra && c.extra.APP_ENV;
+            if (c.name !== "Multica") {
+              console.error("FAIL: app.config name is " + JSON.stringify(c.name) + " - expected Multica");
+              process.exit(1);
+            }
+            if (appEnv !== "production") {
+              console.error("FAIL: app.config extra.APP_ENV is " + JSON.stringify(appEnv) + " - expected production");
+              process.exit(1);
+            }
+            console.log("OK: release app.config carries name=Multica APP_ENV=production");
+          ' "$CONFIG"
 
       - name: Copy versioned APK
         run: node apps/mobile/scripts/copy-versioned-apk.mjs
