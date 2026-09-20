@@ -150,16 +150,26 @@ jobs:
           fi
           echo "OK: dsh.shuzhipin.cn is inlined in the bundle"
 
-      # Guards RAIN-33. expo-constants' `createExpoConfig` gradle task
-      # regenerates app.config from app.config.ts on EVERY build and packs it
-      # into the APK as assets/app.config. Because that happens inside gradle,
-      # the config is evaluated with the gradle step's environment — so APP_ENV
-      # has to be there, and the only way to know it landed is to read the
-      # generated file rather than trust the env plumbing.
-      - name: Verify release app.config
+      - name: Copy versioned APK
+        run: node apps/mobile/scripts/copy-versioned-apk.mjs
+
+      # Guards RAIN-33. app.config is not a source file at runtime: expo-constants'
+      # `createExpoConfig` gradle task regenerates it from app.config.ts on EVERY
+      # build, evaluated against the environment of the gradle step, and packs it
+      # into the APK as assets/app.config. Read it back OUT OF THE APK — that is
+      # the only thing that proves what actually ships. (Checking the generated
+      # file on disk is not equivalent: the task lives in the `:expo-constants`
+      # subproject, so it writes into node_modules, not the app module's build dir.)
+      - name: Verify release app.config in the APK
         run: |
-          CONFIG=apps/mobile/android/app/build/generated/assets/expo-constants/app.config
-          test -f "$CONFIG" || { echo "FAIL: app.config not generated at $CONFIG"; exit 1; }
+          APK=$(ls apps/mobile/dist/multica-app-v*.apk | head -1)
+          test -n "$APK" || { echo "FAIL: no APK produced"; exit 1; }
+          MEMBER=$(unzip -Z1 "$APK" | grep -E '(^|/)app\.config$' | head -1)
+          test -n "$MEMBER" || { echo "FAIL: APK contains no app.config asset"; exit 1; }
+          echo "APK: $APK"
+          echo "app.config member: $MEMBER"
+          CONFIG="$RUNNER_TEMP/app.config"
+          unzip -p "$APK" "$MEMBER" > "$CONFIG"
           cat "$CONFIG"; echo
           node -e '
             const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -172,11 +182,8 @@ jobs:
               console.error("FAIL: app.config extra.APP_ENV is " + JSON.stringify(appEnv) + " - expected production");
               process.exit(1);
             }
-            console.log("OK: release app.config carries name=Multica APP_ENV=production");
+            console.log("OK: shipped app.config carries name=Multica APP_ENV=production");
           ' "$CONFIG"
-
-      - name: Copy versioned APK
-        run: node apps/mobile/scripts/copy-versioned-apk.mjs
 
       - name: Verify APK signature
         run: |
