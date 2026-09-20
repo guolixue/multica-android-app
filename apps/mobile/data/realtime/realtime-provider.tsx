@@ -34,7 +34,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { AppState, type AppStateStatus } from "react-native";
+import { AppState, Platform, type AppStateStatus } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -90,6 +90,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         url: WS_URL,
         token,
         workspaceSlug: wsSlug,
+        // Real OS of the running build ("android" on the dsh APK) — shows up
+        // in server-side connection logs.
+        clientOs: Platform.OS,
         clientVersion: "0.2.0",
         logger: console,
       });

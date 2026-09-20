@@ -81,6 +81,15 @@ jobs:
       # in the environment of the Gradle step that runs `expo export:embed` —
       # not merely on disk. Sourced from the committed env file so there is one
       # source of truth.
+      #
+      # APP_ENV is exported for the same reason and is NOT redundant with the
+      # .env.production sourcing above: app.config.ts reads process.env.APP_ENV
+      # to pick the display name ("Multica" vs "Multica (Dev)") and the value it
+      # records in `extra.APP_ENV`. Nothing inside the app ever reads APP_ENV
+      # from a .env file — it is read exclusively by app.config.ts, at the
+      # moment Expo regenerates the config. Leaving it unset silently produced a
+      # release APK whose embedded `assets/app.config` said
+      # {"name":"Multica (Dev)","extra":{"APP_ENV":"development"}} (RAIN-33).
       - name: Load production env
         run: |
           set -a
@@ -90,7 +99,8 @@ jobs:
           test -n "$EXPO_PUBLIC_WEB_URL" || { echo "EXPO_PUBLIC_WEB_URL empty"; exit 1; }
           echo "EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL" >> "$GITHUB_ENV"
           echo "EXPO_PUBLIC_WEB_URL=$EXPO_PUBLIC_WEB_URL" >> "$GITHUB_ENV"
-          echo "Bundle will target: $EXPO_PUBLIC_API_URL (web: $EXPO_PUBLIC_WEB_URL)"
+          echo "APP_ENV=production" >> "$GITHUB_ENV"
+          echo "Bundle will target: $EXPO_PUBLIC_API_URL (web: $EXPO_PUBLIC_WEB_URL), APP_ENV=production"
 
       - name: Generate Android project
         working-directory: apps/mobile
@@ -142,6 +152,38 @@ jobs:
 
       - name: Copy versioned APK
         run: node apps/mobile/scripts/copy-versioned-apk.mjs
+
+      # Guards RAIN-33. app.config is not a source file at runtime: expo-constants'
+      # `createExpoConfig` gradle task regenerates it from app.config.ts on EVERY
+      # build, evaluated against the environment of the gradle step, and packs it
+      # into the APK as assets/app.config. Read it back OUT OF THE APK — that is
+      # the only thing that proves what actually ships. (Checking the generated
+      # file on disk is not equivalent: the task lives in the `:expo-constants`
+      # subproject, so it writes into node_modules, not the app module's build dir.)
+      - name: Verify release app.config in the APK
+        run: |
+          APK=$(ls apps/mobile/dist/multica-app-v*.apk | head -1)
+          test -n "$APK" || { echo "FAIL: no APK produced"; exit 1; }
+          MEMBER=$(unzip -Z1 "$APK" | grep -E '(^|/)app\.config$' | head -1)
+          test -n "$MEMBER" || { echo "FAIL: APK contains no app.config asset"; exit 1; }
+          echo "APK: $APK"
+          echo "app.config member: $MEMBER"
+          CONFIG="$RUNNER_TEMP/app.config"
+          unzip -p "$APK" "$MEMBER" > "$CONFIG"
+          cat "$CONFIG"; echo
+          node -e '
+            const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const appEnv = c.extra && c.extra.APP_ENV;
+            if (c.name !== "Multica") {
+              console.error("FAIL: app.config name is " + JSON.stringify(c.name) + " - expected Multica");
+              process.exit(1);
+            }
+            if (appEnv !== "production") {
+              console.error("FAIL: app.config extra.APP_ENV is " + JSON.stringify(appEnv) + " - expected production");
+              process.exit(1);
+            }
+            console.log("OK: shipped app.config carries name=Multica APP_ENV=production");
+          ' "$CONFIG"
 
       - name: Verify APK signature
         run: |
