@@ -1,19 +1,34 @@
 # Build a release APK on every `v*` tag push and attach it to a GitHub
 # Release, so users can download installable APKs from the Releases page.
 #
-# Flow (matches apps/mobile/CLAUDE.md "Build & release" rules):
-#   1. version-bump --set <tag>  — write the EXACT tag version (v0.2.3 → 0.2.3)
+# This fork (`guolixue/multica-android-app`) builds against the self-hosted
+# instance at dsh.shuzhipin.cn. The API/web origin lives in
+# apps/mobile/.env.production and is loaded into the job environment below, so
+# that one committed file stays the source of truth for the JS bundle.
+#
+# Flow:
+#   1. version-bump --set <tag>  — write the EXACT tag version (v0.2.4 → 0.2.4)
 #      into package.json / app.config.ts / build.gradle, so the release APK
-#      is versioned identically to the tag (not bumped +1, which is the
-#      local dev-build rule).
+#      is versioned identically to the tag.
 #   2. expo prebuild --platform android — the android/ dir is git-ignored, so
 #      CI regenerates it from app.config.ts before building.
-#   3. gradlew assembleRelease — universal build (all ABIs) so any device
+#   3. configure-release-signing — repoint the release variant at the real
+#      release keystore. Expo's stock template signs the release variant with
+#      the *debug* keystore, which still passes `apksigner verify` but is a
+#      publicly known key anyone can forge updates with.
+#   4. gradlew assembleRelease — universal build (all ABIs) so any device
 #      can install the APK.
-#   4. copy-versioned-apk — rename to apps/mobile/dist/multica-app-v<v>.apk.
-#   5. action-gh-release — attach the APK to the Release for this tag.
+#   5. verify — assert the API origin actually made it into the JS bundle, and
+#      print `apksigner verify` output for the artifact.
+#   6. copy-versioned-apk + action-gh-release — attach the APK to the Release.
 #
-# Tag version source: GITHUB_REF_NAME is the tag (e.g. "v0.2.3"); strip the
+# Required repository secrets (managed by the ops role):
+#   ANDROID_KEYSTORE_BASE64  — base64 of the release .keystore file
+#   RELEASE_STORE_PASSWORD   — keystore password
+#   RELEASE_KEY_ALIAS        — key alias
+#   RELEASE_KEY_PASSWORD     — key password
+#
+# Tag version source: GITHUB_REF_NAME is the tag (e.g. "v0.2.4"); strip the
 # leading "v" to get the semver.
 name: Android Release
 
@@ -55,31 +70,94 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The bundle inlines EXPO_PUBLIC_* at build time, so the values have to be
+      # in the environment of the Gradle step that runs `expo export:embed` —
+      # not merely on disk. Sourced from the committed env file so there is one
+      # source of truth.
+      - name: Load production env
+        run: |
+          set -a
+          . apps/mobile/.env.production
+          set +a
+          test -n "$EXPO_PUBLIC_API_URL" || { echo "EXPO_PUBLIC_API_URL empty"; exit 1; }
+          test -n "$EXPO_PUBLIC_WEB_URL" || { echo "EXPO_PUBLIC_WEB_URL empty"; exit 1; }
+          echo "EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_WEB_URL=$EXPO_PUBLIC_WEB_URL" >> "$GITHUB_ENV"
+          echo "Bundle will target: $EXPO_PUBLIC_API_URL (web: $EXPO_PUBLIC_WEB_URL)"
+
       - name: Generate Android project
         working-directory: apps/mobile
         run: pnpm exec expo prebuild --platform android --no-install
 
-      - name: Ensure debug keystore
+      - name: Decode release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          if [ ! -f apps/mobile/android/app/debug.keystore ]; then
-            keytool -genkeypair -v -keystore apps/mobile/android/app/debug.keystore \
-              -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "ANDROID_KEYSTORE_BASE64 secret is not set"; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          test -s "$RUNNER_TEMP/release.keystore" || { echo "decoded keystore is empty"; exit 1; }
+          echo "Decoded release keystore: $(wc -c < "$RUNNER_TEMP/release.keystore") bytes"
+
+      - name: Configure release signing
+        working-directory: apps/mobile
+        env:
+          RELEASE_STORE_FILE: ${{ runner.temp }}/release.keystore
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: node scripts/configure-release-signing.mjs
 
       - name: Set version from tag
         run: node apps/mobile/scripts/bump-android-version.mjs --set "${GITHUB_REF_NAME#v}"
 
       - name: Build release APK
         working-directory: apps/mobile/android
+        env:
+          RELEASE_STORE_FILE: ${{ runner.temp }}/release.keystore
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: ./gradlew assembleRelease
+
+      # Guards the risk that .env.production is silently not picked up and the
+      # app ships with an undefined API origin (apps/mobile/data/api.ts throws
+      # at startup when EXPO_PUBLIC_API_URL is missing).
+      - name: Verify API origin is inlined in the JS bundle
+        run: |
+          BUNDLE=$(find apps/mobile/android/app/build/generated/assets -name '*.bundle' -type f | head -1)
+          test -n "$BUNDLE" || { echo "no JS bundle found"; exit 1; }
+          echo "Bundle: $BUNDLE ($(wc -c < "$BUNDLE") bytes)"
+          if ! grep -q "dsh.shuzhipin.cn" "$BUNDLE"; then
+            echo "FAIL: dsh.shuzhipin.cn not present in the JS bundle — EXPO_PUBLIC_API_URL was not inlined"
+            exit 1
+          fi
+          echo "OK: dsh.shuzhipin.cn is inlined in the bundle"
 
       - name: Copy versioned APK
         run: node apps/mobile/scripts/copy-versioned-apk.mjs
+
+      - name: Verify APK signature
+        run: |
+          APK=$(ls apps/mobile/dist/multica-app-v*.apk | head -1)
+          test -n "$APK" || { echo "no APK produced"; exit 1; }
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          test -n "$APKSIGNER" || { echo "apksigner not found"; exit 1; }
+          echo "APK: $APK"
+          echo "--- apksigner verify --verbose --print-certs ---"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          echo "--- aapt2 dump badging ---"
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -1)
+          "$AAPT" dump badging "$APK" | head -5
 
       - name: Upload APK to Release
         uses: softprops/action-gh-release@v2
         with:
           files: apps/mobile/dist/multica-app-v*.apk
           generate_release_notes: true
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: multica-app-release-apk
+          path: apps/mobile/dist/multica-app-v*.apk
+          if-no-files-found: error
