@@ -43,6 +43,7 @@ function connectAuthenticatedClient() {
     url: "wss://example.test/ws",
     token: "token",
     workspaceSlug: "workspace",
+    clientOs: "android",
   });
   client.connect();
   const socket = MockWebSocket.instances[0];
@@ -62,6 +63,15 @@ describe("WSClient application heartbeat", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("dials with the caller's client_os instead of a hardcoded one", () => {
+    const { client, socket } = connectAuthenticatedClient();
+    const params = new URL(socket.url).searchParams;
+
+    expect(params.get("client_platform")).toBe("mobile");
+    expect(params.get("client_os")).toBe("android");
+    client.disconnect();
   });
 
   it("reconnects a stale OPEN socket through the jittered backoff path", () => {
